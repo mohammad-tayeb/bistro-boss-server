@@ -128,8 +128,16 @@ async function run() {
             res.send({ admin })
         })
 
-        //menu related api
-        app.post('/menu',verifyToken,verifyAdmin, async (req, res) => {
+
+        //////////////////////////////menu related api
+        //delete menuItem
+        app.delete('/menu/:id', async (req, res) => {
+            const id = req.params.id;
+            const query = { _id: new ObjectId(id) }
+            const result = await menuCollection.deleteOne(query)
+            res.send(result)
+        })
+        app.post('/menu', verifyToken, verifyAdmin, async (req, res) => {
             const item = req.body;
             const result = await menuCollection.insertOne(item)
             res.send(result)
