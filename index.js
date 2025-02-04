@@ -5,6 +5,10 @@ const port = process.env.PORT || 5000
 require('dotenv').config()
 const jwt = require('jsonwebtoken');
 
+//*************************************************** */ stripe
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+
+
 //middleware
 app.use(cors());
 app.use(express.json())
@@ -29,12 +33,12 @@ async function run() {
         const reviewsCollection = client.db("bistroDB").collection("reviews")
         const cartCollection = client.db("bistroDB").collection("carts")
         const usersCollection = client.db("bistroDB").collection("users")
+        const paymentsCollection = client.db("bistroDB").collection("payments")
 
         //middleware 
         //verify token
         //This code defines a middleware function (verifyToken) that is used to verify the JWT token in incoming requests. It ensures that the user is authenticated before allowing access to protected routes.
         const verifyToken = (req, res, next) => {
-            console.log('inside verfyToken', req.headers.authorization)
             if (!req.headers.authorization) { //authorization data is send from axiosSecure after getting the token from local storage
                 return res.status(401).send({ message: 'unauthorized access' })
             }
@@ -76,9 +80,8 @@ async function run() {
         })
 
 
-        // user related api
+        ////////////////////////////////////////// user related api
         app.get('/users', verifyToken, verifyAdmin, async (req, res) => {  //********use verifyToken middleware
-            console.log(req.headers)
             const result = await usersCollection.find().toArray();
             res.send(result)
         })
@@ -133,7 +136,7 @@ async function run() {
         //get single menu data
         app.get('/menu/:id', async (req, res) => {
             const id = req.params.id
-            const query = {_id: new ObjectId(id)}
+            const query = { _id: new ObjectId(id) }
             const result = await menuCollection.findOne(query)
             res.send(result)
         })
@@ -176,7 +179,7 @@ async function run() {
             res.send(result)
         })
 
-        //  carts route
+        //////////////////////////////////////////carts related route
         app.get('/carts', async (req, res) => {
             const email = req.query.email  //changes
             const query = { email: email }   //changes
@@ -199,6 +202,50 @@ async function run() {
 
 
 
+        //////////////////////////////////////stripe related routes
+        //payment intent
+        app.post('/create-payment-intent', async (req, res) => {
+            const { price } = req.body;
+            const amount = parseInt(price * 100) //stripe poisha te price hisba kore 1taka/100 poisa
+
+            const paymentIntent = await stripe.paymentIntents.create({
+                amount: amount,
+                currency: 'usd',
+                payment_method_types: ['card']
+            })
+
+            res.send({
+                clientSecret: paymentIntent.client_secret,
+            });
+        })
+
+        // payment information storeing and also deleting cart data after payment
+        app.post('/payments', async (req, res) => {
+            //insert payment data
+            const payment = req.body
+            const paymentResult = await paymentsCollection.insertOne(payment)
+            console.log(payment)
+            // delete cart data
+            //here 'payemnt.cartIds' is an array. all the including ids in the array are deleted  
+            const query = {
+                _id: {
+                    $in: payment.cartIds.map(id => new ObjectId(String(id)))
+                }
+            }
+            const deleteResult = await cartCollection.deleteMany(query);
+            res.send({ paymentResult, deleteResult })
+
+        })
+
+        //*******************************************payment information receiving
+        app.get('/payments/:email', verifyToken, async (req, res) => {
+            const query = { email: req.params.email }
+            if (req.params.email !== req.decoded.email) {
+                return res.status(403).send({ message: 'forbidden access' })
+            }
+            const result = await paymentsCollection.find(query).toArray()
+            res.send(result)
+        })
 
         // Send a ping to confirm a successful connection
         await client.db("admin").command({ ping: 1 });
