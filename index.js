@@ -247,6 +247,67 @@ async function run() {
             res.send(result)
         })
 
+
+        //database collections stats
+        app.get('/admin-stats',verifyToken,verifyAdmin, async (req, res) => {
+            const users = await usersCollection.estimatedDocumentCount()
+            const products = await menuCollection.estimatedDocumentCount()
+            const reviews = await reviewsCollection.estimatedDocumentCount()
+            const orders = await paymentsCollection.estimatedDocumentCount()
+
+            // get the sum of the price field from paymentsCollection for stats perpose
+            const result = await paymentsCollection.aggregate([
+                {
+                    $group: {
+                        _id: null,
+                        totalRevenue: {
+                            $sum: '$price'
+                        }
+                    }
+                }
+            ]).toArray()
+            const revenue = result.length > 0 ? result[0].totalRevenue : 0
+
+            res.send({ users, products, reviews, orders, revenue })
+        })
+
+        // Aggregate pipeline to get order statistics
+        app.get('/order-stats', async (req, res) => {
+            const result = await paymentsCollection.aggregate([
+                {
+                    $unwind: '$menuItemIds'  // Splits the array 'menuItemIds' into multiple documents, one per item
+                },
+                {
+                    $lookup: {  // Joins 'paymentsCollection' with the 'menu' collection
+                        from: 'menu',  // The collection to join (menu items)
+                        localField: 'menuItemIds',  // Field in 'paymentsCollection' to match
+                        foreignField: '_id',  // Corresponding field in 'menu' collection
+                        as: 'menuItems'  // Output array containing matching menu items
+                    }
+                },
+                {
+                    $unwind: '$menuItems'  // Since 'menuItems' is an array, we break it into separate documents
+                },
+                {
+                    $group: {
+                        _id: '$menuItems.category',  // Grouping by menu category
+                        quantity: { $sum: 1 },  // Counting occurrences (total items per category)
+                        revenue: { $sum: '$menuItems.price' }  // Summing up the prices for total revenue
+                    }
+                },
+                {
+                    $project: {
+                        _id: 0,
+                        category: '$_id',
+                        quantity: '$quantity',
+                        revenue: '$revenue'
+                    }
+                }
+            ]).toArray();  // Convert aggregation result to an array
+            res.send(result);  // Send the final grouped data as response
+        });
+
+
         // Send a ping to confirm a successful connection
         await client.db("admin").command({ ping: 1 });
         console.log("Pinged your deployment. You successfully connected to MongoDB!");
